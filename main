@@ -1,0 +1,409 @@
+
+!/usr/bin/env pybricks-micropython
+
+from pybricks import ev3brick as brick
+from pybricks.ev3devices import (Motor, TouchSensor, ColorSensor,
+InfraredSensor, UltrasonicSensor, GyroSensor)
+from pybricks.parameters import (Port, Stop, Direction, Button, Color,
+SoundFile, ImageFile, Align)
+from pybricks.tools import print, wait, StopWatch
+from pybricks.robotics import DriveBase
+import time
+
+import ubinascii
+import ujson
+import urequests
+import utime
+import re
+
+#Write your program here
+
+b_one = TouchSensor(Port.S2)
+b_two = TouchSensor(Port.S3)
+eyes = UltrasonicSensor(Port.S1)
+rmotor = Motor(Port.A)
+lmotor = Motor(Port.B)
+trigger = Motor(Port.C)
+trigger.reset_angle(0)
+
+def get_key():
+fin = open('key.txt')
+for element in fin:
+return element
+def SL_setup():
+Key = get_key()
+urlBase = "https://api.systemlinkcloud.com/nitag/v2/tags/"
+headers = {"Accept":"application/json","x-ni-api-key":Key}
+return urlBase, headers
+def Put_SL(Tag, Type, Value):
+urlBase, headers = SL_setup()
+urlValue = urlBase + Tag + "/values/current"
+propValue = {"value":{"type":Type,"value":Value}}
+try:
+reply = urequests.put(urlValue,headers=headers,json=propValue).text
+except Exception as e:
+print(e)
+reply = 'failed'
+return reply
+def Get_SL(Tag):
+urlBase, headers = SL_setup()
+urlValue = urlBase + Tag + "/values/current"
+print(urlValue)
+print(headers)
+try:
+value = urequests.get(urlValue,headers=headers).text
+print(value)
+data = ujson.loads(value)
+print('data')
+print(data)
+result = data.get("value").get("value")
+print(result)
+except Exception as e:
+print(e)
+result = 'failed'
+return result
+def Create_SL(Tag, Type):
+urlBase, headers = SL_setup()
+urlTag = urlBase + Tag
+propName={"type":Type,"path":Tag}
+try:
+urequests.put(urlTag,headers=headers,json=propName).text
+except Exception as e:
+print(e)
+def shot():
+#a method to provide feedback as to whether the shot was made
+brick.sound.beep(600,200,2)
+a = 0
+b = 0
+while True:
+if b_one.pressed() == True:
+a = a + 1
+wait(300)
+if b_two.pressed() == True:
+b = b + 1
+wait(300)
+if a + b == 2:
+if a == 2:
+r = 'short'
+brick.sound.beep(600,200,2)
+return r
+
+elif b == 2:
+r = 'long'
+brick.sound.beep(600,200,2)
+return r
+else:
+r ='bucket'
+brick.sound.beep(600,200,2)
+return r
+wait(2000)
+def index_search(number, num_list):
+#returns the index of the value when the distance in [mm] is the input: number
+while True:
+num = number/1000
+num = str(num)
+if len(num) < 4:
+num = num + '0000'
+num = num[0] + num[1] + num[2] + num[3]
+index = 0
+while index < len(num_list):
+str(num_list)
+if num_list[index] == num:
+return index
+index = index + 1
+else:
+number = eyes.distance()
+def des_speed(number,num_list,num_list2):
+#returns the speed in m/s required to send the projectile a certain distance based on the simulation
+speed = num_list2[index_search(number, num_list)]
+return speed
+def speed_conv(speed):
+#converts the speed in [m/s] to a value to input into the motors
+speed = float(speed)
+speed = (speed/4.14) * 417 + 123
+return speed
+def launch(spd):
+rmotor.run(spd)
+lmotor.run(spd)
+ts = time.time()
+tn = ts
+wait(500)
+
+#Proportional controller to get the speed correct
+while tn - ts < 5:
+K = 1/4 #proportionality constant
+dsr = spd - rmotor.speed()
+dsl = spd - lmotor.speed()
+rmotor.run(spd + K * dsr)
+lmotor.run(spd + K * dsl)
+wait(20)
+tn = time.time()
+s = (abs(rmotor.speed()) + abs(lmotor.speed()))/2
+trigger.run_target(200, 180, Stop.COAST, True)
+wait(1000)
+rmotor.run(0)
+lmotor.run(0)
+trigger.run_target(200, 0, Stop.COAST, True)
+return s
+def dist_sim():
+#load distances from simulation into list
+fin_one = open('distdata.txt')
+distd = list()
+for line in fin_one:
+datum = line.strip()
+distd.append(datum)
+fin_one.close
+return distd
+def vel_sim():
+#load velocities from simulation into list
+fin_two = open('vdata.txt')
+vd = list()
+for line in fin_two:
+datum = line.strip()
+vd.append(datum)
+fin_two.close
+return vd
+def made_it(dist, spd):
+#Records new data into the lists
+fin_one = open('learn_dist.txt','a')
+fin_two = open('learn_spd.txt','a')
+fin_one.write("\n")
+fin_two.write("\n")
+dist = str(dist)
+spd = str(spd)
+fin_one.write(dist)
+fin_two.write(spd)
+fin_one.close
+fin_two.close
+def sorter(lister):
+#sorts a list of string numbers into numerical order and reutns a list of numbers
+num = list()
+for index in range(len(lister)):
+num.append(float(lister[index]))
+num.sort()
+return num
+def number_maker(string):
+#turns a string into a number
+num = ''
+for index in range (len(string)):
+try:
+int(string[index])
+num = num + string[index]
+if index == len(string) - 1:
+return int(num)
+except:
+return int(num)
+def load_distances():
+fin_one = open('learn_dist.txt','r')
+distances = list()
+for element in fin_one:
+element.strip()
+dists = number_maker(element)
+distances.append(dists)
+distances.sort()
+fin_one.close
+return distances
+def load_speeds():
+fin_two = open('learn_spd.txt','r')
+speeds = list()
+for element in fin_two:
+element.strip()
+spd = ''
+for i in range(3):
+spd = spd + element[i]
+speeds.append(int(spd))
+speeds.sort()
+fin_two.close
+return speeds
+def average_of_six(dist,dvalues, svalues):
+#takes the average of the six values in the list and return
+spids = list()
+for index in range(3): # take the mean of the nearest values
+dnum = dvalues[5 - index] - dist
+dden = dvalues[5 - index] - dvalues[index]
+sdiff = svalues[5 - index] - svalues[index]
+spid = svalues[index] + sdiff * dnum/dden
+spids.append(spid)
+speed = (spids[0] + 2 * spids[1] + 3 * spids[2])/6
+return speed
+def AI_speed_conv(dist):
+#inputs a distance and returns the velocity based on AI
+distances = load_distances()
+speeds = load_speeds()
+values = nearest_neighbors(dist,distances,speeds)
+dvalues = values[0]
+svalues = values[1]
+spd = average_of_six(dist,dvalues,svalues)
+return spd
+def mean(data):
+y = 0
+for element in data:
+y = y + element
+return y/len(data)
+def regression(dist):
+#liniarize the data and fit a linear regression that determines an output
+x_list = load_distances()
+ys = load_speeds()
+y_list = list()
+for index in range(len(ys)):
+y_list.append(ys[index] ** 2)
+x_bar = mean(x_list)
+y_bar = mean(y_list)
+xy_list = list()
+for index in range(len(x_list)):
+xy_list.append(x_list[index]*y_list[index])
+xy_bar = mean(xy_list)
+x_squared_list = list()
+for index in range(len(x_list)):
+x_squared_list.append(x_list[index] ** 2)
+x_squared_bar = mean(x_squared_list)
+m = (x_bar * y_bar - xy_bar)/(x_bar ** 2 - x_squared_bar)
+b = y_bar - m * x_bar
+ans_squared = m * dist + b
+return ans_squared ** (1/2)
+def nearest_neighbors(dist,distances,speeds):
+# finds the six nearest neighbors
+dvalues = list()
+svalues = list()
+n = 0
+up = dist + 1
+down = dist - 1
+while n < 6:
+up = up + 1
+down = down - 1
+for index in range(len(distances)):
+if down == distances[index]:
+dvalues.append(distances[index])
+svalues.append(speeds[index])
+n = n + 1
+if up == distances[index]:
+dvalues.append(distances[index])
+svalues.append(speeds[index])
+n = n + 1
+if dist == distances[index]:
+dvalues.append(distances[index])
+svalues.append(speeds[index])
+n = n+ 1
+dvalues.sort()
+svalues.sort()
+return dvalues, svalues
+
+#different models:
+def linear_model():
+#Uses a linear equation to relate motor speed to distance
+while Get_SL('launch') != 'true':
+wait(10)
+brick.sound.beep(600,200,2)
+adder = 0
+while True:
+dist = eyes.distance()
+Put_SL('distance', 'STRING', str(dist))
+print('dist:',dist)
+spd = ((dist - 49)/675 * 290) + 180 + adder
+Put_SL('speed', 'STRING', str(spd))
+launch(spd)
+feedback = shot()
+if feedback == 'bucket':
+made_it(dist,spd)
+break
+elif feedback == 'short':
+adder += 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+else:
+adder += - 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+def physcial_model():
+#Uses data from a second order RK method, with drag as a fucntion of Reynolds No.
+#to relate motor speed to velocity
+distd = sorter(distsim())
+vd = sorter(velsim())
+while Get_SL('launch') != 'true':
+wait(10)
+brick.sound.beep(600,200,2)
+adder = 0
+while True:
+dist = eyes.distance()
+Put_SL('distance', 'STRING', str(dist))
+print('dist:',dist)
+spd = speed_conv(des_speed(dist,distd,vd)) + adder
+Put_SL('speed', 'STRING', str(spd))
+speed = launch(spd)
+feedback = shot()
+if feedback == 'bucket':
+made_it(dist,spd)
+break
+elif feedback == 'short':
+adder += 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+else:
+adder += - 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+dist = eyes.distance()
+def nearest_neighbors_model():
+#Uses a weighted average of the six nearest neighbors to relate distance to velocity
+adder = 0
+while Get_SL('launch') != 'true':
+wait(10)
+brick.sound.beep(600,200,2)
+while True:
+dist = eyes.distance()
+Put_SL('distance', 'STRING', str(dist))
+print('dist:',dist)
+spd = AI_speed_conv(dist) + adder
+Put_SL('speed', 'STRING', str(spd))
+speed = launch(spd)
+feedback = shot()
+if feedback == 'bucket':
+made_it(dist,spd)
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+elif feedback == 'short':
+adder += 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+else:
+adder += - 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+dist = eyes.distance()
+def regression_model():
+#uses a linear regression of past data transfromed to be linerized and the regression inverse transformed back
+adder = 0
+while Get_SL('launch') != 'true':
+wait(10)
+brick.sound.beep(600,200,2)
+while True:
+dist = eyes.distance()
+Put_SL('distance', 'STRING', str(dist))
+print('dist:',dist)
+spd = regression(dist) + adder
+Put_SL('speed', 'STRING', str(spd))
+speed = launch(spd)
+feedback = shot()
+if feedback == 'bucket':
+made_it(dist,spd)
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+elif feedback == 'short':
+adder += 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+else:
+adder += - 1
+brick.sound.beep(600,200,2)
+wait(200)
+brick.sound.beep(600,200,2)
+dist = eyes.distance()
