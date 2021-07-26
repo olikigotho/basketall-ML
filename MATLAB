@@ -1,0 +1,197 @@
+% initial conditions
+clc
+clear all
+
+dt = 0.0001;
+
+m = 0.0139; %[kg]
+g = 9.81;  % [m/s]
+mu = 1.81 * 10^-5; % [Kg/(m * s)]
+d = 0.052; % [m]
+rho = 1.225; % [kg/m^3]
+A = pi * d^2 /4; %[m^2];
+
+xgoal = 0.04:0.01:1.75;
+
+V = zeros(1,length(xgoal));
+
+for xime = 1:length(xgoal)
+    goal = xgoal(xime);
+    Vl = 0;
+    Vu = 5;
+    xreal = 0;
+    while abs(goal - xreal) > 0.001 % bisection method.
+        Vm = (Vu + Vl)/2;
+        V0 = Vm;
+        u0 = V0 * cos(0.628319); %[m/s]
+        v0 = V0 * sin(0.628319); %[m/s]
+
+
+        x0 = 0.01; % [m]
+        y0 = 0.20; % [m]
+
+
+        u = [u0];
+        v = [v0];
+        x = [x0];
+        y = [y0];
+
+
+        t = [0];
+        index = 1;
+
+        while y(index) > 0.1426
+            vtot = (u(index)^2 + v(index)^2)^(1/2);
+            k = zeros(2,4);
+            VX = zeros(1,4);
+            VY = zeros(1,4);
+            VX(1) = u(index);
+            VY(1) = v(index);
+            for windex = 1:4
+                Re = rho * vtot * d/mu;
+                Cd = 24/Re + 1.5; % drag model for a sphere at low Re
+                %Development of empirical models with high accuracy for estimation
+                %of drag coefficient of flow around a smooth sphere:
+                %An evolutionary approach
+                %Barati, Reza ;
+                %Neyshabouri, Seyed Ali Akbar Salehi 
+                %; Ahmadi, Goodarz.
+                %2014
+                Fd = 0; %-1/2 * rho * vtot^2 * Cd * A; %Drag force
+                theta = atan(VY(windex)/VX(windex)); % direction of drag froce
+                Fx = Fd * cos(theta);
+                Fy = Fd * sin(theta) - m * g;
+                k(:,windex) = [Fx;Fy]./m;
+                if windex < 3
+                    VX(windex + 1) = u(index) + k(1,windex) * dt/2;
+                    VY(windex + 1) = v(index) + k(2,windex) * dt/2;
+                elseif windex == 3
+                    VX(windex + 1) = u(index) + k(1,windex) * dt;
+                    VY(windex + 1) = v(index) + k(2,windex) * dt;
+                end
+            end
+            u(index + 1) = u(index) ...
+                + (1/6) * (k(1,1) + 2 * (k(1,2) + k(1,3)) + k(1,4)) * dt;
+            v(index + 1) = v(index) ...
+                + (1/6) * (k(2,1) + 2 * (k(2,2) + k(2,3)) + k(2,4)) * dt;
+            x(index + 1) = x(index) ...
+                + (1/6) * (VX(1) + 2 * (VX(2) + VX(3)) + VX(4)) * dt;
+            y(index + 1) = y(index) ...
+                + (1/6) * (VY(1) + 2 * (VY(2) + VY(3)) + VY(4)) * dt;
+            t(index + 1) = t(index) + dt;
+            index = index + 1;
+            
+        end
+        xreal = x(end);
+        if xreal < goal
+            Vl = Vm;
+        elseif xreal > goal
+            Vu = Vm;
+        end
+    
+    end
+    V(xime) = Vm;
+    if xime == 60
+        figure(1)
+        clf
+        plot(x * 1000,y * 1000)
+        xlabel('location [mm]')
+        ylabel('location[mm]')
+        title('Sample Trajectory Simulation')
+        axis equal
+        grid on
+    end
+end
+
+% create the various models
+x_sim = xgoal * 1000;
+spd_lin = (x_sim - 49)/675 * 290 + 180;
+spd_sim = (V/4.14) * 417 + 123;
+x_real = distance_data;
+spd_real = speed_data;
+
+
+%Calculate the coefficients of determination of the varius models
+ys = [];
+yl = [];
+
+for index = 1:length(x_real)
+ys = [ys,spline(x_sim,spd_sim,x_real(index))];
+yl = [yl,spline(x_sim,spd_lin,x_real(index))];
+end
+               
+yresid = spd_real- ys;
+SSresid = sum(yresid.^2);
+SStotal = (length(spd_real) -1) * var(spd_real);
+rsq = 1-SSresid/SStotal;
+disp('R^2 Simulation')
+disp(rsq)
+
+yresid = spd_real- yl;
+SSresid = sum(yresid.^2);
+SStotal = (length(spd_real) -1) * var(spd_real);
+rsq = 1-SSresid/SStotal;
+disp('R^2 Linear')
+disp(rsq)
+
+%make a linear regression
+p = polyfit(x_real,spd_real.^2,1);
+y_fit = (polyval(p,x_real)).^(1/2);
+yresid = spd_real- y_fit;
+SSresid = sum(yresid.^2);
+SStotal = (length(spd_real) -1) * var(spd_real);
+rsq = 1-SSresid/SStotal;
+disp('R^2 Regression')
+disp(rsq)
+
+
+x_fit = sort(x_real);
+y_fit = sort(y_fit);
+
+%plot the data
+figure(2)
+clf
+plot(x_sim(1:120),spd_lin(1:120))
+hold on
+plot(x_sim(1:120),spd_sim(1:120))
+hold on 
+plot(x_fit,y_fit);
+scatter(x_real,spd_real)
+xlabel('distance [mm]')
+ylabel('angular velocity [deg/s]')
+title('Angular Velocity of the Motor vs Distance of Cup')
+legend('linear model','physical model','linear regression','data')
+grid on
+
+figure(3)
+clf
+plot(x_sim(1:120),spd_sim(1:120))
+hold on 
+scatter(x_real,spd_real)
+xlabel('distance [mm]')
+ylabel('angular velocity [deg/s]')
+title('Physical model and Experimental Data')
+grid on
+
+figure(4)
+clf
+scatter(x_real,spd_real)
+hold on 
+plot(x_fit,y_fit);
+xlabel('distance [mm]')
+ylabel('angular velocity [deg/s]')
+title('Linear Regression and Experimental Data')
+grid on
+
+figure(5)
+clf
+plot(x_sim(1:120),spd_sim(1:120))
+hold on 
+plot(x_fit,y_fit);
+xlabel('distance [mm]')
+ylabel('angular velocity [deg/s]')
+title('Linear Regression and Physical Model')
+legend('physical model','linear regression')
+grid on
+
+
